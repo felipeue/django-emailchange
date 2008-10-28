@@ -31,10 +31,17 @@ class EmailChangeManager(models.Manager):
 		"""
 		try:
 			email_change = self.model.objects.get(activation_key=activation_key)
-			expiration_date = datetime.timedelta(days=settings.EMAILCHANGE_ACTIVATION_DAYS)
-			if email_change.requested_at + expiration_date < datetime.datetime.now():
+			if email_change.activation_key_expired():
 				email_change.delete()
 				raise EmailChange.DoesNotExist
+			# is there an active user with this address?
+			try:
+				User.objects.get(email=email_change.new_email_address)
+			except User.DoesNotExist:
+				pass
+			else:
+				return None
+			# update user
 			user = User.objects.get(pk=email_change.user_id)
 			user.email = email_change.new_email_address
 			user.save()
@@ -60,11 +67,13 @@ class EmailChangeManager(models.Manager):
 
 		try:
 			activation_key = sha.new(str(random.random()) + smart_str(new_email_address))
-			ec = EmailChange.objects.filter(Q(user=user) or Q(new_email_address=new_email_address))
-			if len(ec):
-				ec = ec[0]
-			else:
-				ec = EmailChange(user=user, new_email_address=new_email_address)
+			try:
+				ec = EmailChange.objects.get(user=user)
+			except EmailChange.DoesNotExist:
+				try:
+					ec = EmailChange.objects.get(new_email_address=new_email_address)
+				except:
+					ec = EmailChange(user=user, new_email_address=new_email_address)
 			ec.activation_key=activation_key.hexdigest()
 			ec.new_email_address = new_email_address
 			ec.save()
@@ -92,4 +101,9 @@ class EmailChange(models.Model):
 	user = models.ForeignKey(User, unique=True)
 	requested_at = models.DateTimeField(default=datetime.datetime.now())
 	activation_key = models.CharField(max_length=40, unique=True, db_index=True)
+
 	objects = EmailChangeManager()
+
+	def activation_key_expired(self):
+		expiration_date = datetime.timedelta(days=settings.EMAILCHANGE_ACTIVATION_DAYS)
+		return self.requested_at + expiration_date < datetime.datetime.now()
