@@ -1,0 +1,1 @@
+A simple app to enable users to change their email address.
